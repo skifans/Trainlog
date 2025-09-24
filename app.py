@@ -5523,7 +5523,7 @@ def processPublicTrips(tripIds):
         # Calculate carbon footprint
         path_data = json.loads(paths[trip["uid"]]) if trip["uid"] in paths else []
         trip_carbon = calculate_carbon_footprint_for_trip(trip, path_data)
-        trip["carbon_footprint"] = round(trip_carbon, 2)
+        trip["carbon_footprint"] = round(trip_carbon, 6)
         
         # Add to totals
         total_carbon += trip_carbon
@@ -5555,7 +5555,7 @@ def processPublicTrips(tripIds):
     priceDict = {
         "total_price": total_price, 
         "user_currency": user_currency,
-        "total_carbon": round(total_carbon, 2),
+        "total_carbon": round(total_carbon, 6),
         "total_distance": round(total_distance, 2)
     }
     
