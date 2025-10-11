@@ -153,34 +153,40 @@ function getLangTooltip(lang, text=false){
 }
 
 
-function secondsToDhm(seconds, locale) {
+function secondsToDhm(seconds, locale, style="narrow") {
     if (typeof seconds !== "number" || isNaN(seconds)) {
-        return seconds;
+      return seconds;
     }
-
+    
     const totalSeconds = Math.floor(seconds);
-    const days = Math.floor(totalSeconds / 86400);
+    
+    // Calculate time units (using approximate values)
+    const years = Math.floor(totalSeconds / 31536000); // 365 days
+    const months = Math.floor((totalSeconds % 31536000) / 2592000); // 30 days
+    const days = Math.floor((totalSeconds % 2592000) / 86400);
     const hours = Math.floor((totalSeconds % 86400) / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
     const secs = totalSeconds % 60;
-
+    
     // Build structured duration
     const duration = {};
+    if (years > 0) duration.years = years;
+    if (months > 0) duration.months = months;
     if (days > 0) duration.days = days;
     if (hours > 0) duration.hours = hours;
     if (minutes > 0) duration.minutes = minutes;
-
+    
     // Show seconds if:
     // - less than 1 minute total, OR
-    // - we already have minutes and some leftover seconds
-    if (totalSeconds < 60 || (minutes > 0 && secs > 0 && !days && !hours)) {
-        duration.seconds = secs;
+    // - we already have minutes and some leftover seconds (but no larger units)
+    if (totalSeconds < 60 || (minutes > 0 && secs > 0 && !days && !hours && !months && !years)) {
+      duration.seconds = secs;
     }
-
+    
     return new Intl.DurationFormat(locale || "en", {
-        style: "narrow"
+      style: style
     }).format(duration);
-}
+  }
 
 function getGetParams(){
   queryString = window.location.search;

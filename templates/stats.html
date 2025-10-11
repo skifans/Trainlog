@@ -130,7 +130,7 @@
         duration: {
             label: '{{tripDuration}}',
             suffix: 'Duration',
-            formatValue: (value) => secondsToDhm(value, LANG),
+            formatValue: (value) => secondsToDhm(value, LANG, "long"),
             enabled: true
         },
         carbon: {
@@ -659,18 +659,28 @@
         var dataKey = dataKeyMap[chartId];
         var displayData = extractDataForMetric(statsData, currentMetric);
         var dataToUse = displayData[dataKey];
+        var config = METRICS_CONFIG[currentMetric];
 
         var option = {
-            title: { text: document.getElementById(chartId).previousElementSibling?.textContent || '' },
+            title: { 
+                text: chartsInstances[dataKey.replace('chart-', '')]?.getOption()?.title?.[0]?.text || ''
+            },
             tooltip: {
                 trigger: 'axis',
                 axisPointer: { type: 'shadow' },
                 formatter: commonTooltipFormatter 
             },
-            grid: { containLabel: true, width: '80%', height: '80%' },
+            grid: { 
+                containLabel: true, 
+                width: '80%', 
+                height: '85%',
+                bottom: '10%',
+                top: '10%'
+            },
             series: createSeries(dataToUse, getColor(tripType))
         };
 
+        // Configure axes based on chart type
         if (['countries', 'operators'].includes(dataKey)) {
             option.yAxis = {
                 type: 'category',
@@ -708,7 +718,26 @@
                         : item.operator
                 )
             };
-            option.xAxis = { type: 'value' };
+            option.xAxis = { 
+                type: 'value',
+                axisLabel: {
+                    formatter: function (value) {
+                        return value >= 1000 ? (value / 1000) + 'k' : value;
+                    }
+                }
+            };
+            
+            // Add vertical slider for countries/operators
+            option.dataZoom = [
+                {
+                    type: 'slider',
+                    yAxisIndex: 0,
+                    top: '70px',
+                    right: '20px',
+                    startValue: 0,
+                    endValue: 20
+                }
+            ];
         } else {
             option.xAxis = {
                 type: 'category',
@@ -723,7 +752,29 @@
                     return item.station;
                 })
             };
-            option.yAxis = { type: 'value' };
+            option.yAxis = { 
+                type: 'value',
+                axisLabel: {
+                    formatter: function (value) {
+                        return value >= 1000 ? (value / 1000) + 'k' : value;
+                    }
+                }
+            };
+            
+            // Add horizontal slider for other charts
+            if (dataKey !== 'years') {
+                option.dataZoom = [
+                    {
+                        type: 'slider',
+                        xAxisIndex: 0,
+                        bottom: '10px',
+                        left: '25px',
+                        right: '25px',
+                        startValue: 0,
+                        endValue: 20
+                    }
+                ];
+            }
         }
 
         chartInstance.setOption(option);
