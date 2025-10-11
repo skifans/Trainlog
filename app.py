@@ -182,7 +182,7 @@ from src.api.leaderboards import _getLeaderboardUsers
 from src.api.news import news_blueprint
 from src.api.finance import finance_blueprint
 from src.api.carbon import carbon_blueprint
-from src.api.stats import stats_blueprint, fetch_stats_by_mode, get_distinct_stat_years
+from src.api.stats import stats_blueprint, fetch_stats, get_distinct_stat_years
 from src.consts import DbNames, TripTypes
 from src.pg import setup_db
 from src.suspicious_activity import (
@@ -4014,24 +4014,21 @@ def current(username):
         **session["userinfo"],
     )
 
-@app.route("/<username>/getStats/<tripType>/<mode>", methods=["GET"])
-@app.route("/<username>/getStats/<year>/<tripType>/<mode>", methods=["GET"])
+@app.route("/<username>/getStats/<tripType>", methods=["GET"])
+@app.route("/<username>/getStats/<year>/<tripType>", methods=["GET"])
 @public_required
-def get_stats_api(username, tripType, mode, year=None):
-    """JSON API endpoint for fetching stats (trips or km)"""
-    if mode not in ['trips', 'km']:
-        return jsonify({'error': 'Mode must be "trips" or "km"'}), 400
-    stats = fetch_stats_by_mode(username, tripType, year, mode=mode)
+def get_stats_api(username, tripType, year=None):
+    """JSON API endpoint for fetching stats (both trips and km)"""
+    stats = fetch_stats(username, tripType, year)
     return jsonify(stats)
 
-@app.route("/admin/getStats/<tripType>/<mode>", methods=["GET"])
-@app.route("/admin/getStats/<year>/<tripType>/<mode>", methods=["GET"])
+
+@app.route("/admin/getStats/<tripType>", methods=["GET"])
+@app.route("/admin/getStats/<year>/<tripType>", methods=["GET"])
 @owner_required
-def get_admin_stats_api(tripType, mode, year=None):
-    """JSON API endpoint for fetching admin stats (trips or km)"""
-    if mode not in ['trips', 'km']:
-        return jsonify({'error': 'Mode must be "trips" or "km"'}), 400
-    stats = fetch_stats_by_mode(None, tripType, year, mode=mode)
+def get_admin_stats_api(tripType, year=None):
+    """JSON API endpoint for fetching admin stats (both trips and km)"""
+    stats = fetch_stats(None, tripType, year)
     return jsonify(stats)
 
 @app.route("/public/<username>/stats/<year>/<tripType>")

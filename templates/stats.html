@@ -36,24 +36,12 @@
         {% endfor %}
     </select>
     
-    <div id="statsSelectD-flex" class="d-flex align-items-center mr-2">
-        <p id="statsSelectTrips" class="mr-2">
-            {{trips}}
-        </p>
-        <div class="form-check form-switch form-check-inline">
-            <input class="form-check-input float-end"
-                   type="checkbox"
-                   role="switch"
-                   id="kmTrips">
-        </div>
-        <p id="statsSelectKm" class="ml-2">
-            {{km}}
-        </p>
-    </div>
+    <div id="metricSelectorWrapper" class="mr-2"></div>
 </div>
 
 <div class="noDataDiv" style='display:none;'>
-    <br><br><center><h3>{{noData}}</h3></center></div>
+    <br><br><center><h3>{{noData}}</h3></center>
+</div>
 
 <div class="container" style="max-width:95%">
     <div class="row">
@@ -120,32 +108,75 @@
 <div style="height: 100px;"></div>
 
 <script type="text/javascript">
-    function getScreenSize() {
-        var screenWidth = window.innerWidth || document.documentElement.clientWidth || document.body.clientWidth;
-        return screenWidth;
+    // ============================================
+    // METRICS CONFIGURATION
+    // ============================================
+    const METRICS_CONFIG = {
+        trips: {
+            label: '{{trips}}',
+            suffix: 'Trips',
+            unit: '{{trips}}'.toLowerCase(),
+            formatValue: (value) => value,
+            enabled: true
+        },
+        km: {
+            label: '{{km}}',
+            suffix: 'Km',
+            unit: 'km',
+            formatValue: (value) => Math.round(value / 1000),
+            enabled: true
+        },
+        duration: {
+            label: 'Duration',
+            suffix: 'Duration',
+            unit: 'hours',
+            formatValue: (value) => Math.round(value / 60),
+            enabled: false
+        },
+        co2: {
+            label: 'CO₂ Saved',
+            suffix: 'Co2',
+            unit: 'kg CO₂',
+            formatValue: (value) => Math.round(value),
+            enabled: false
+        },
+        cost: {
+            label: 'Cost',
+            suffix: 'Cost',
+            unit: '€',
+            formatValue: (value) => Math.round(value * 100) / 100,
+            enabled: false
+        }
+    };
+
+    function getEnabledMetrics() {
+        return Object.keys(METRICS_CONFIG).filter(key => METRICS_CONFIG[key].enabled);
     }
 
-    function isMobile(){
-        return getScreenSize() < 750
-    }
-
-    window.addEventListener('resize', function() {
-        getScreenSize();
-    });
-
+    // ============================================
+    // GLOBAL STATE & UTILITIES
+    // ============================================
     var tripType = "{{tripType}}";
-    var yearDefined = "{{ 'true' if statYear is not none else 'false' }}";
     var username = "{{username}}";
     var statYear = "{{statYear if statYear else ''}}";
+    var yearDefined = "{{ 'true' if statYear is not none else 'false' }}";
     
-    var viewMode = 'trips'; // Default view mode
-    var tripsData = null; // Cache for trips data
-    var kmData = null; // Cache for km data
+    var currentMetric = 'trips';
+    var statsData = null;
+    var chartsInstances = {};
     var currentChart = null;
     var expandedMode = false;
 
-    var operatorImages = {{logosList | safe}}
+    var operatorImages = {{logosList | safe}};
     var staticLink = "{{ url_for('resize_image', max_width=240, target_height=40, image_path='')}}";
+
+    function getScreenSize() {
+        return window.innerWidth || document.documentElement.clientWidth || document.body.clientWidth;
+    }
+
+    function isMobile() {
+        return getScreenSize() < 750;
+    }
 
     function normalizeKey(input) {
         return input
@@ -164,34 +195,102 @@
         document.getElementById('loadingScreen').style.display = 'none';
     }
 
-    function convertToKilometers(data) {
-        return data.map(item => ({
-            ...item,
-            past: Math.round(item.past / 1000),
-            plannedFuture: Math.round(item.plannedFuture / 1000)
-        }));
+    window.addEventListener('resize', function() {
+        Object.keys(chartsInstances).forEach(key => {
+            if (chartsInstances[key]) {
+                chartsInstances[key].resize();
+            }
+        });
+    });
+
+    // ============================================
+    // UI CREATION
+    // ============================================
+    function createMetricSelector() {
+        const enabledMetrics = getEnabledMetrics();
+        return `
+            <select id="metricSelector" class="form-select statsSelect">
+                ${enabledMetrics.map(metric => `
+                    <option value="${metric}" ${metric === currentMetric ? 'selected' : ''}>
+                        ${METRICS_CONFIG[metric].label}
+                    </option>
+                `).join('')}
+            </select>
+        `;
     }
 
-    function createPattern(color) {
+    function attachMetricSelectorListener() {
+        const selector = document.getElementById('metricSelector');
+        selector.addEventListener('change', function() {
+            switchMetric(this.value);
+        });
+    }
+
+    // ============================================
+    // DATA EXTRACTION
+    // ============================================
+    function extractDataForMetric(data, metric) {
+        const config = METRICS_CONFIG[metric];
+        const suffix = config.suffix;
+        
+        function convertItem(item) {
+            const converted = {};
+            
+            // Copy identifier fields
+            if (item.country) converted.country = item.country;
+            if (item.operator) converted.operator = item.operator;
+            if (item.material) converted.material = item.material;
+            if (item.route) converted.route = item.route;
+            if (item.station) converted.station = item.station;
+            if (item.year !== undefined) converted.year = item.year;
+            
+            // Extract metric values
+            // Check if item has the metric-specific fields (e.g., pastTrips/pastKm)
+            if (item['past' + suffix] !== undefined) {
+                // Standard format: pastTrips, pastKm, etc.
+                converted.past = config.formatValue(item['past' + suffix] || 0);
+                converted.plannedFuture = config.formatValue(item['plannedFuture' + suffix] || 0);
+                
+                if (item['future' + suffix] !== undefined) {
+                    converted.future = config.formatValue(item['future' + suffix] || 0);
+                }
+            } else if (item.pastKm !== undefined && suffix === 'Km') {
+                // Routes/Stations with Km data
+                converted.past = config.formatValue(item.pastKm || 0);
+                converted.plannedFuture = config.formatValue(item.plannedFutureKm || 0);
+                if (item.futureKm !== undefined) {
+                    converted.future = config.formatValue(item.futureKm || 0);
+                }
+            } else {
+                // Fallback to trip counts (past/plannedFuture/future)
+                converted.past = item.past || 0;
+                converted.plannedFuture = item.plannedFuture || 0;
+                if (item.future !== undefined) {
+                    converted.future = item.future || 0;
+                }
+            }
+            
+            return converted;
+        }
+        
+        function sortByTotal(arr) {
+            return arr.map(convertItem).sort((a, b) => 
+                (b.past + b.plannedFuture) - (a.past + a.plannedFuture)
+            );
+        }
+        
         return {
-            type: 'pattern',
-            image: createPatternImage(color),
-            repeat: 'repeat'
+            countries: sortByTotal(data.countries || []),
+            operators: sortByTotal(data.operators || []),
+            material: sortByTotal(data.material || []),
+            routes: (data.routes || []).map(convertItem).sort((a, b) => 
+                (b.past + b.plannedFuture + (b.future || 0)) - (a.past + a.plannedFuture + (a.future || 0))
+            ),
+            stations: (data.stations || []).map(convertItem).sort((a, b) => 
+                (b.past + b.plannedFuture + (b.future || 0)) - (a.past + a.plannedFuture + (a.future || 0))
+            ),
+            years: (data.years || []).map(convertItem)
         };
-    }
-
-    function createPatternImage(color) {
-        var canvas = document.createElement('canvas');
-        canvas.width = 4;
-        canvas.height = 4;
-        var ctx = canvas.getContext('2d');
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(4, 0);
-        ctx.lineTo(0, 4);
-        ctx.stroke();
-        return canvas;
     }
 
     function groupData(data, key) {
@@ -208,14 +307,25 @@
         return grouped;
     }
 
-    function prepareGroupedData(data) {
+    // ============================================
+    // CHART STYLING
+    // ============================================
+    function createPattern(color) {
+        var canvas = document.createElement('canvas');
+        canvas.width = 4;
+        canvas.height = 4;
+        var ctx = canvas.getContext('2d');
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(4, 0);
+        ctx.lineTo(0, 4);
+        ctx.stroke();
+        
         return {
-            countries: groupData(data.countries, 'country'),
-            operators: groupData(data.operators, 'operator'),
-            routes: groupData(data.routes, 'route'),
-            stations: groupData(data.stations, 'station'),
-            material: groupData(data.material, 'material'),
-            years: data.years
+            type: 'pattern',
+            image: canvas,
+            repeat: 'repeat'
         };
     }
 
@@ -250,27 +360,35 @@
                 stack: 'Total',
                 data: data.map(item => ({ 
                     value: item.plannedFuture,
-                    itemStyle: {
-                        color: createPattern(color)
-                    },
-                    tooltipValue: item.plannedFuture
+                    itemStyle: { color: createPattern(color) }
                 }))
             }
         ];
     }
 
+    // ============================================
+    // CHART RENDERING
+    // ============================================
     function renderCharts(data) {
+        // Dispose existing charts
+        Object.keys(chartsInstances).forEach(key => {
+            if (chartsInstances[key]) {
+                chartsInstances[key].dispose();
+            }
+        });
+        chartsInstances = {};
+
         var hGridConfig = {
             bottom: '28px',
-            left: isMobile() ? '60px' : '120px',
+            left: isMobile() ? '60px' : '120px'
         };
         var vGridConfig = {
             bottom: '120px',
-            left: '28px',
+            left: '28px'
         };
         var yGridConfig = {
             bottom: '28px',
-            left: '28px',
+            left: '28px'
         };
 
         var dataToUse = expandedMode ? data : {
@@ -303,53 +421,44 @@
                     return value >= 1000 ? (value / 1000) + 'k' : value;
                 }
             }
-        }
-
-        var lastTooltipContent = '';
+        };
 
         function commonTooltipFormatter(params) {
+            const config = METRICS_CONFIG[currentMetric];
             var result = params[0].name + '<br/>';
+            
             params.forEach(function(item) {
                 if (item.value > 0) {
                     var marker;
                     if (item.seriesName === '{{plannedFuture}}') {
                         var pattern = createPattern(getColor(tripType));
-                        var patternCanvas = pattern.image;
-                        var patternURL = patternCanvas.toDataURL();
+                        var patternURL = pattern.image.toDataURL();
                         marker = `<span style="display:inline-block;margin-right:5px;border-radius:10px;width:10px;height:10px;background:url(${patternURL});"></span>`;
                     } else {
                         marker = item.marker;
                     }
-                    suffix = viewMode == 'km' ? "km" : "{{trips}}".toLowerCase();
-                    result += `${marker}  ${item.seriesName} : ${formatNumber("{{langId}}",item.value)} ${suffix} <br/>`;
+                    result += `${marker}  ${item.seriesName} : ${formatNumber("{{langId}}", item.value)} ${config.unit}<br/>`;
                 }
             });
-
-            if (result !== lastTooltipContent) {
-                lastTooltipContent = result;
-            }
-
+            
             return result;
         }
         
+        // Countries Chart
         var countriesChart = echarts.init(document.getElementById('chart-countries'));
+        chartsInstances['countries'] = countriesChart;
         countriesChart.setOption({
             title: { text: "{{crossedCountries}}" },
             tooltip: {
                 trigger: 'axis',
                 axisPointer: { type: 'shadow' },
-                formatter: function(params) {
-                    return commonTooltipFormatter(params);
-                }
+                formatter: commonTooltipFormatter
             },
             yAxis: {
-                ...commonCatAxisOptions,
-                inverse: true,
-                align: "left",
                 type: 'category',
+                inverse: true,
                 axisLabel: {
-                    rotate: 0,
-                    formatter: function (value, index) {
+                    formatter: function (value) {
                         return !isMobile() ? value : value.slice(-5);
                     }
                 },
@@ -359,35 +468,32 @@
             },
             xAxis: commonValAxisOptions,
             grid: hGridConfig,
-            series: createSeries(viewMode === 'km' ? convertToKilometers(dataToUse.countries) : dataToUse.countries, getColor(tripType))
+            series: createSeries(dataToUse.countries, getColor(tripType))
         });
 
+        // Operators Chart
         var operatorsChart = echarts.init(document.getElementById('chart-operators'));
+        chartsInstances['operators'] = operatorsChart;
         operatorsChart.setOption({
             title: { text: "{{operator}}" },
             tooltip: {
                 trigger: 'axis',
                 axisPointer: { type: 'shadow' },
-                formatter: function(params) {
-                    return commonTooltipFormatter(params);
-                }
+                formatter: commonTooltipFormatter
             },
             yAxis: {
-                ...commonCatAxisOptions,
                 type: 'category',
                 inverse: true,
                 axisLabel: {
-                    rotate: 0,
                     formatter: function(value) {
                         const normalizedKey = normalizeKey(value);
                         if (operatorImages[value]) {
                             return `{${normalizedKey}|}`;
-                        } else {
-                            return value;
                         }
+                        return value;
                     },
                     rich: Object.assign({}, ...Object.keys(operatorImages).map(operator => {
-                        const normalizedKey =  normalizeKey(operator);
+                        const normalizedKey = normalizeKey(operator);
                         return {
                             [normalizedKey]: {
                                 width: isMobile() ? 50 : 110,
@@ -403,37 +509,86 @@
             },
             xAxis: commonValAxisOptions,
             grid: hGridConfig,
-            series: createSeries(viewMode === 'km' ? convertToKilometers(dataToUse.operators) : dataToUse.operators, getColor(tripType))
+            series: createSeries(dataToUse.operators, getColor(tripType))
         });
 
+        // Years Chart
+        var yearsChart = echarts.init(document.getElementById('chart-years'));
+        chartsInstances['years'] = yearsChart;
+        yearsChart.setOption({
+            title: { text: "{{year}}" },
+            tooltip: {
+                trigger: 'axis',
+                axisPointer: { type: 'shadow' },
+                formatter: commonTooltipFormatter
+            },
+            xAxis: {
+                type: 'category',
+                data: dataToUse.years.map(item => item.year)
+            },
+            yAxis: commonValAxisOptions,
+            grid: yGridConfig,
+            series: createSeries(dataToUse.years, getColor(tripType))
+        });
+
+        // Material Chart
+        var materialChart = echarts.init(document.getElementById('chart-material'));
+        chartsInstances['material'] = materialChart;
+        if (dataToUse.material.length == 0) {
+            $("#chart-material").parent().parent().hide();
+        } else {
+            $("#chart-material").parent().parent().show();
+            materialChart.setOption({
+                title: { text: "{{material_type}}" },
+                tooltip: {
+                    trigger: 'axis',
+                    axisPointer: { type: 'shadow' },
+                    formatter: commonTooltipFormatter
+                },
+                xAxis: {
+                    ...commonCatAxisOptions,
+                    data: dataToUse.material.map(item => item.material)
+                },
+                yAxis: commonValAxisOptions,
+                grid: vGridConfig,
+                series: createSeries(dataToUse.material, getColor(tripType))
+            });
+        }
+
+        // Routes Chart
         var routesChart = echarts.init(document.getElementById('chart-routes'));
+        chartsInstances['routes'] = routesChart;
         routesChart.setOption({
             title: { text: '{{routes}}' },
             tooltip: {
                 trigger: 'axis',
                 axisPointer: { type: 'shadow' },
-                formatter: function(params) {
-                    return commonTooltipFormatter(params);
-                }
+                formatter: commonTooltipFormatter
             },
             xAxis: {
                 ...commonCatAxisOptions,
-                data: dataToUse.routes.map(item => JSON.parse(item.route).join(', '))
+                data: dataToUse.routes.map(item => {
+                    try {
+                        return JSON.parse(item.route).join(' - ');
+                    } catch(e) {
+                        return item.route;
+                    }
+                })
             },
             yAxis: commonValAxisOptions,
             grid: vGridConfig,
-            series: createSeries(viewMode === 'km' ? convertToKilometers(dataToUse.routes) : dataToUse.routes, getColor(tripType))
+            series: createSeries(dataToUse.routes, getColor(tripType))
         });
 
+        // Stations Chart
         var stationsChart = echarts.init(document.getElementById('chart-stations'));
+        chartsInstances['stations'] = stationsChart;
         stationsChart.setOption({
             title: { text: '{{stations}}' },
             tooltip: {
                 trigger: 'axis',
                 axisPointer: { type: 'shadow' },
-                formatter: function(params) {
-                    return commonTooltipFormatter(params);
-                }
+                formatter: commonTooltipFormatter
             },
             xAxis: {
                 ...commonCatAxisOptions,
@@ -441,64 +596,25 @@
             },
             yAxis: commonValAxisOptions,
             grid: vGridConfig,
-            series: createSeries(viewMode === 'km' ? convertToKilometers(dataToUse.stations) : dataToUse.stations, getColor(tripType))
-        });
-
-        var yearsChart = echarts.init(document.getElementById('chart-years'));
-        yearsChart.setOption({
-            title: { text: "{{year}}" },
-            tooltip: {
-                trigger: 'axis',
-                axisPointer: { type: 'shadow' },
-                formatter: function(params) {
-                    return commonTooltipFormatter(params);
-                }
-            },
-            xAxis: {
-                ...commonCatAxisOptions,
-                data: dataToUse.years.map(item => item.year),
-                axisLabel: {rotate: 0}
-            },
-            yAxis: commonValAxisOptions,
-            grid: yGridConfig,
-            series: createSeries(viewMode === 'km' ? convertToKilometers(dataToUse.years) : dataToUse.years, getColor(tripType))
-        });
-
-        var materialChart = echarts.init(document.getElementById('chart-material'));
-        if (dataToUse.material.length == 0) {
-            $("#chart-material").parent().parent().hide();
-        }
-        materialChart.setOption({
-            title: { text: "{{material_type}}" },
-            tooltip: {
-                trigger: 'axis',
-                axisPointer: { type: 'shadow' },
-                formatter: function(params) {
-                    return commonTooltipFormatter(params);
-                }
-            },
-            xAxis: {
-                ...commonCatAxisOptions,
-                data: dataToUse.material.map(item => item.material)
-            },
-            yAxis: commonValAxisOptions,
-            grid: vGridConfig,
-            series: createSeries(viewMode === 'km' ? convertToKilometers(dataToUse.material) : dataToUse.material, getColor(tripType))
+            series: createSeries(dataToUse.stations, getColor(tripType))
         });
     }
 
-    async function fetchDataForMode(mode) {
+    // ============================================
+    // DATA FETCHING
+    // ============================================
+    async function fetchStatsData() {
         var isAdmin = "{{ 'true' if admin else 'false' }}";
         
         var urlPath;
         if (isAdmin === "true") {
             urlPath = statYear 
-                ? `/admin/getStats/${statYear}/${tripType}/${mode}`
-                : `/admin/getStats/${tripType}/${mode}`;
+                ? `/admin/getStats/${statYear}/${tripType}`
+                : `/admin/getStats/${tripType}`;
         } else {
             urlPath = statYear 
-                ? `/${username}/getStats/${statYear}/${tripType}/${mode}`
-                : `/${username}/getStats/${tripType}/${mode}`;
+                ? `/${username}/getStats/${statYear}/${tripType}`
+                : `/${username}/getStats/${tripType}`;
         }
             
         try {
@@ -508,47 +624,19 @@
             }
             return await response.json();
         } catch (error) {
-            console.error(`Error fetching ${mode} data:`, error);
+            console.error('Error fetching stats:', error);
             return null;
-        }
-    }
-
-    async function toggleCharts() {
-        var newMode = viewMode === 'trips' ? 'km' : 'trips';
-        
-        // Check if we already have the data cached
-        var cachedData = newMode === 'trips' ? tripsData : kmData;
-        
-        if (cachedData) {
-            viewMode = newMode;
-            renderCharts(cachedData);
-        } else {
-            showLoading();
-            var data = await fetchDataForMode(newMode);
-            
-            if (data) {
-                // Cache the data
-                if (newMode === 'trips') {
-                    tripsData = data;
-                } else {
-                    kmData = data;
-                }
-                
-                viewMode = newMode;
-                renderCharts(data);
-            }
-            hideLoading();
         }
     }
 
     async function fetchDataAndRenderCharts() {
         showLoading();
         try {
-            // Fetch only trips data initially
-            tripsData = await fetchDataForMode('trips');
+            statsData = await fetchStatsData();
             
-            if (tripsData) {
-                renderCharts(tripsData);
+            if (statsData) {
+                var displayData = extractDataForMetric(statsData, currentMetric);
+                renderCharts(displayData);
             } else {
                 console.error('No data available');
             }
@@ -559,17 +647,28 @@
         }
     }
 
+    // ============================================
+    // METRIC SWITCHING
+    // ============================================
+    async function switchMetric(newMetric) {
+        if (!statsData || !METRICS_CONFIG[newMetric]?.enabled) return;
+        
+        currentMetric = newMetric;
+        var displayData = extractDataForMetric(statsData, currentMetric);
+        renderCharts(displayData);
+    }
+
+    // ============================================
+    // FULLSCREEN
+    // ============================================
     function expandChart(chartId) {
         expandedMode = true;
-        var chartElement = document.getElementById(chartId);
         var fullscreenContainer = document.getElementById('fullscreenContainer');
         var fullscreenChart = document.getElementById('fullscreenChart');
         fullscreenContainer.style.display = 'block';
         fullscreenChart.innerHTML = '';
 
         var chartInstance = echarts.init(fullscreenChart);
-        var option = echarts.getInstanceByDom(chartElement).getOption();
-
         var dataKeyMap = {
             'chart-countries': 'countries',
             'chart-operators': 'operators',
@@ -579,60 +678,40 @@
             'chart-years': 'years'
         };
         var dataKey = dataKeyMap[chartId];
+        var displayData = extractDataForMetric(statsData, currentMetric);
+        var dataToUse = displayData[dataKey];
 
-        var currentData = viewMode === 'trips' ? tripsData : kmData;
-        var dataToUse = currentData[dataKey];
-        var color = getColor(tripType);
-        var series = createSeries(viewMode === 'km' ? convertToKilometers(dataToUse) : dataToUse, color);
+        var option = {
+            title: { text: document.getElementById(chartId).previousElementSibling },
+            tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+            grid: { containLabel: true, width: '80%', height: '80%' },
+            series: createSeries(dataToUse, getColor(tripType))
+        };
 
-        option.series = series;
-
-        if (chartId === 'chart-countries' || chartId === 'chart-operators') {
-            option.yAxis[0].data = dataToUse.map(item => {
-                if (dataKey === 'countries') {
-                    return item.country === "{{others}}" ? item.country : `${regionNames.of(item.country)} ${getFlagEmoji(item.country)}`;
-                } else {
-                    return item.operator;
-                }
-            });
+        if (['countries', 'operators'].includes(dataKey)) {
+            option.yAxis = {
+                type: 'category',
+                inverse: true,
+                data: dataToUse.map(item => dataKey === 'countries' ? 
+                    (item.country === "{{others}}" ? item.country : `${regionNames.of(item.country)} ${getFlagEmoji(item.country)}`) :
+                    item.operator)
+            };
+            option.xAxis = { type: 'value' };
         } else {
-            option.xAxis[0].data = dataToUse.map(item => {
-                if (dataKey === 'material') {
-                    return item.material;
-                } else if (dataKey === 'routes') {
-                    return JSON.parse(item.route).join('\n');
-                } else if (dataKey === 'years') {
-                    return item.year;
-                } else {
+            option.xAxis = {
+                type: 'category',
+                axisLabel: { rotate: 45 },
+                data: dataToUse.map(item => {
+                    if (dataKey === 'material') return item.material;
+                    if (dataKey === 'routes') {
+                        try { return JSON.parse(item.route).join(' - '); }
+                        catch(e) { return item.route; }
+                    }
+                    if (dataKey === 'years') return item.year;
                     return item.station;
-                }
-            });
-        }
-
-        option.grid = { containLabel: true, width: '80%', height: '90%', bottom: '5%' };
-        if (chartId === 'chart-material') {
-            option.dataZoom = [
-                {
-                    type: 'slider',
-                    xAxisIndex: 0,
-                    bottom: '10px',
-                    left: '25px',
-                    right: '25px',
-                    startValue: 0,
-                    endValue: 20
-                }
-            ];
-        } else if (['chart-operators', 'chart-countries'].includes(chartId)) {
-            option.dataZoom = [
-                {
-                    type: 'slider',
-                    yAxisIndex: 0,
-                    top: '70px',
-                    right: '20px',
-                    startValue: 0,
-                    endValue: 20
-                }
-            ];
+                })
+            };
+            option.yAxis = { type: 'value' };
         }
 
         chartInstance.setOption(option);
@@ -646,70 +725,73 @@
             currentChart.dispose();
             currentChart = null;
         }
-        var currentData = viewMode === 'trips' ? tripsData : kmData;
-        renderCharts(currentData);
+        var displayData = extractDataForMetric(statsData, currentMetric);
+        renderCharts(displayData);
     });
 
+    // ============================================
+    // EVENT HANDLERS
+    // ============================================
     $("#statsSelectYear").change(function() {
         var selectedYear = $(this).val();
-        var tripType = "{{ tripType }}";
         var isPublic = "{{ 'true' if is_public else 'false' }}";
         var isAdmin = "{{ 'true' if admin else 'false' }}";
 
         var redirectUrl;
         if (isAdmin == "true") {
-            if (selectedYear === "all") {
-                redirectUrl = '{{ url_for("admin_stats", tripType=tripType) }}';
-            } else {
-                redirectUrl = '{{ url_for("admin_stats", year="selectedYear", tripType=tripType) }}'.replace("selectedYear", selectedYear);
-            }
+            redirectUrl = selectedYear === "all" ? 
+                '{{ url_for("admin_stats", tripType=tripType) }}' :
+                '{{ url_for("admin_stats", year="YEAR", tripType=tripType) }}'.replace("YEAR", selectedYear);
+        } else if (isPublic == "true") {
+            redirectUrl = selectedYear === "all" ?
+                '{{ url_for("public_stats", username=username, tripType=tripType) }}' :
+                '{{ url_for("public_stats", username=username, year="YEAR", tripType=tripType) }}'.replace("YEAR", selectedYear);
         } else {
-            if (isPublic == "true") {
-                if (selectedYear === "all") {
-                    redirectUrl = '{{ url_for("public_stats", username=username, tripType=tripType) }}';
-                } else {
-                    redirectUrl = '{{ url_for("public_stats", username=username, year="selectedYear", tripType=tripType) }}'.replace("selectedYear", selectedYear);
-                }
-            } else {
-                if (selectedYear === "all") {
-                    redirectUrl = '{{ url_for("stats", username=username, tripType=tripType) }}';
-                } else {
-                    redirectUrl = '{{ url_for("stats", username=username, year="selectedYear", tripType=tripType) }}'.replace("selectedYear", selectedYear);
-                }
-            }
+            redirectUrl = selectedYear === "all" ?
+                '{{ url_for("stats", username=username, tripType=tripType) }}' :
+                '{{ url_for("stats", username=username, year="YEAR", tripType=tripType) }}'.replace("YEAR", selectedYear);
         }
 
         window.location.href = redirectUrl;
     });
 
     $("#statsSelectTripType").change(function() {
-        var tripType = $(this).val();
-        var yearDefined = "{{ 'true' if statYear is not none else 'false' }}";
+        var newTripType = $(this).val();
         var isPublic = "{{ 'true' if is_public else 'false' }}";
         var isAdmin = "{{ 'true' if admin else 'false' }}";
         
-        var allUrl, yearUrl;
+        var redirectUrl;
         if (isAdmin == "true") {
-            allUrl = '{{ url_for("admin_stats", tripType="") }}' + tripType;
-            yearUrl = '{{ url_for("admin_stats", year=statYear, tripType="") }}' + tripType;
+            redirectUrl = yearDefined == "true" ?
+                '{{ url_for("admin_stats", year=statYear, tripType="") }}' + newTripType :
+                '{{ url_for("admin_stats", tripType="") }}' + newTripType;
+        } else if (isPublic == "true") {
+            redirectUrl = yearDefined == "true" ?
+                '{{ url_for("public_stats", username=username, year=statYear, tripType="") }}' + newTripType :
+                '{{ url_for("public_stats", username=username, tripType="") }}' + newTripType;
         } else {
-            if (isPublic == "true") {
-                allUrl = '{{ url_for("public_stats", username=username, tripType="") }}' + tripType;
-                yearUrl = '{{ url_for("public_stats", username=username, year=statYear, tripType="") }}' + tripType;
-            } else {
-                allUrl = '{{ url_for("stats", username=username, tripType="") }}' + tripType;
-                yearUrl = '{{ url_for("stats", username=username, year=statYear, tripType="") }}' + tripType;
-            }
+            redirectUrl = yearDefined == "true" ?
+                '{{ url_for("stats", username=username, year=statYear, tripType="") }}' + newTripType :
+                '{{ url_for("stats", username=username, tripType="") }}' + newTripType;
         }
 
-        var redirectUrl = yearDefined == "true" ? yearUrl : allUrl;
         window.location.href = redirectUrl;
     });
 
-    document.getElementById('kmTrips').addEventListener('change', toggleCharts);
+    // ============================================
+    // INITIALIZATION
+    // ============================================
+    async function initializeStats() {
+        const wrapper = document.getElementById('metricSelectorWrapper');
+        if (wrapper) {
+            wrapper.innerHTML = createMetricSelector();
+            attachMetricSelectorListener();
+        }
+        
+        await fetchDataAndRenderCharts();
+    }
 
-    // Initial fetch and render
-    fetchDataAndRenderCharts();
+    initializeStats();
 </script>
 
 {% endblock %}

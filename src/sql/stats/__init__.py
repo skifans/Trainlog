@@ -48,24 +48,14 @@ class ComposedSqlTemplate:
         return text(full_query)
 
 
-# Define which CTEs each query needs
-stats_operator_km = ComposedSqlTemplate(
-    "src/sql/stats/stats_operator_km.sql",
+# Define combined queries (both trips and km in one query)
+stats_operator = ComposedSqlTemplate(
+    "src/sql/stats/stats_operator.sql",
     ['base_filter', 'time_categories', 'split_operators']
 )
 
-stats_operator_trips = ComposedSqlTemplate(
-    "src/sql/stats/stats_operator_trips.sql",
-    ['base_filter', 'time_categories', 'split_operators']
-)
-
-stats_material_km = ComposedSqlTemplate(
-    "src/sql/stats/stats_material_km.sql",
-    ['base_filter', 'time_categories', 'split_material']
-)
-
-stats_material_trips = ComposedSqlTemplate(
-    "src/sql/stats/stats_material_trips.sql",
+stats_material = ComposedSqlTemplate(
+    "src/sql/stats/stats_material.sql",
     ['base_filter', 'time_categories', 'split_material']
 )
 
@@ -74,33 +64,18 @@ stats_countries = ComposedSqlTemplate(
     ['base_filter', 'time_categories']
 )
 
-stats_routes_km = ComposedSqlTemplate(
-    "src/sql/stats/stats_routes_km.sql",
+stats_routes = ComposedSqlTemplate(
+    "src/sql/stats/stats_routes.sql",
     ['base_filter', 'time_categories']
 )
 
-stats_routes_trips = ComposedSqlTemplate(
-    "src/sql/stats/stats_routes_trips.sql",
+stats_stations = ComposedSqlTemplate(
+    "src/sql/stats/stats_stations.sql",
     ['base_filter', 'time_categories']
 )
 
-stats_stations_km = ComposedSqlTemplate(
-    "src/sql/stats/stats_stations_km.sql",
-    ['base_filter', 'time_categories']
-)
-
-stats_stations_trips = ComposedSqlTemplate(
-    "src/sql/stats/stats_stations_trips.sql",
-    ['base_filter', 'time_categories']
-)
-
-stats_year_km = ComposedSqlTemplate(
-    "src/sql/stats/stats_year_km.sql",
-    ['base_filter', 'time_categories']
-)
-
-stats_year_trips = ComposedSqlTemplate(
-    "src/sql/stats/stats_year_trips.sql",
+stats_year = ComposedSqlTemplate(
+    "src/sql/stats/stats_year.sql",
     ['base_filter', 'time_categories']
 )
 
