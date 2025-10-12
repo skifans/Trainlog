@@ -644,6 +644,34 @@
             bottom: '28px',
             left: '28px'
         };
+        var commonTooltipConfig = {
+            trigger: 'axis',
+            axisPointer: { type: 'shadow' },
+            formatter: commonTooltipFormatter,
+            confine: true,  // ADD THIS - keeps tooltip within chart container
+            appendToBody: true,  // ADD THIS - appends to body for better positioning
+            position: function (point, params, dom, rect, size) {
+                // Custom position to prevent overflow
+                var x = point[0];
+                var y = point[1];
+                var viewWidth = size.viewSize[0];
+                var viewHeight = size.viewSize[1];
+                var boxWidth = size.contentSize[0];
+                var boxHeight = size.contentSize[1];
+                
+                // Adjust horizontal position
+                if (x + boxWidth > viewWidth) {
+                    x = viewWidth - boxWidth - 10;
+                }
+                
+                // Adjust vertical position
+                if (y + boxHeight > viewHeight) {
+                    y = viewHeight - boxHeight - 10;
+                }
+                
+                return [x, y];
+            }
+        };
 
         var dataToUse = expandedMode ? data : {
             countries: groupData(data.countries, 'country'),
@@ -685,11 +713,7 @@
         chartsInstances['countries'] = countriesChart;
         countriesChart.setOption({
             title: { text: "{{crossedCountries}}" },
-            tooltip: {
-                trigger: 'axis',
-                axisPointer: { type: 'shadow' },
-                formatter: commonTooltipFormatter
-            },
+            tooltip: commonTooltipConfig,
             yAxis: {
                 type: 'category',
                 inverse: true,
@@ -712,11 +736,7 @@
         chartsInstances['operators'] = operatorsChart;
         operatorsChart.setOption({
             title: { text: "{{operator}}" },
-            tooltip: {
-                trigger: 'axis',
-axisPointer: { type: 'shadow' },
-                formatter: commonTooltipFormatter
-            },
+            tooltip: commonTooltipConfig,
             yAxis: {
                 type: 'category',
                 inverse: true,
@@ -753,11 +773,7 @@ axisPointer: { type: 'shadow' },
         chartsInstances['years'] = yearsChart;
         yearsChart.setOption({
             title: { text: "{{year}}" },
-            tooltip: {
-                trigger: 'axis',
-                axisPointer: { type: 'shadow' },
-                formatter: commonTooltipFormatter
-            },
+            tooltip: commonTooltipConfig,
             xAxis: {
                 type: 'category',
                 data: dataToUse.years.map(item => item.year)
@@ -776,11 +792,7 @@ axisPointer: { type: 'shadow' },
             $("#chart-material").parent().parent().show();
             materialChart.setOption({
                 title: { text: "{{material_type}}" },
-                tooltip: {
-                    trigger: 'axis',
-                    axisPointer: { type: 'shadow' },
-                    formatter: commonTooltipFormatter
-                },
+                tooltip: commonTooltipConfig,
                 xAxis: {
                     ...commonCatAxisOptions,
                     data: dataToUse.material.map(item => item.material)
@@ -796,11 +808,7 @@ axisPointer: { type: 'shadow' },
         chartsInstances['routes'] = routesChart;
         routesChart.setOption({
             title: { text: '{{routes}}' },
-            tooltip: {
-                trigger: 'axis',
-                axisPointer: { type: 'shadow' },
-                formatter: commonTooltipFormatter
-            },
+            tooltip: commonTooltipConfig,
             xAxis: {
                 ...commonCatAxisOptions,
                 data: dataToUse.routes.map(item => {
@@ -821,11 +829,7 @@ axisPointer: { type: 'shadow' },
         chartsInstances['stations'] = stationsChart;
         stationsChart.setOption({
             title: { text: '{{stations}}' },
-            tooltip: {
-                trigger: 'axis',
-                axisPointer: { type: 'shadow' },
-                formatter: commonTooltipFormatter
-            },
+            tooltip: commonTooltipConfig,
             xAxis: {
                 ...commonCatAxisOptions,
                 data: dataToUse.stations.map(item => item.station)

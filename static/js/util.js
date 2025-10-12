@@ -1125,14 +1125,26 @@ function formatCarbonValue(value, unit = '') {
     if (grams < 1) {
       return `< 1 g CO₂eq${unit}`;
     }
-    return `${grams.toFixed(0)}g CO₂eq${unit}`;
+    return `${grams.toFixed(0)} g CO₂eq${unit}`;
   }
-  
   if (value < 10) {
-    return `${value.toFixed(1)}kg CO₂eq${unit}`;
+    return `${value.toFixed(1)} kg CO₂eq${unit}`;
   }
-  
-  return `${value.toFixed(0)}kg CO₂eq${unit}`;
+  if (value < 1000) {
+    return `${value.toFixed(0)} kg CO₂eq${unit}`;
+  }
+  if (value < 1000000) {
+    const tons = value / 1000;
+    if (tons < 10) {
+      return `${tons.toFixed(1)} t CO₂eq${unit}`;
+    }
+    return `${tons.toFixed(0)} t CO₂eq${unit}`;
+  }
+  const kilotons = value / 1000000;
+  if (kilotons < 10) {
+    return `${kilotons.toFixed(1)} kt CO₂eq${unit}`;
+  }
+  return `${kilotons.toFixed(0)} kt CO₂eq${unit}`;
 }
 
 // Function to format CO2/km for display
