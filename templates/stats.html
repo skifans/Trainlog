@@ -15,12 +15,18 @@
 <div id="statsSelectWrapper" class="d-flex flex-wrap mb-3">
     <select id="statsSelectTripType" class="form-select statsSelect mr-2">
         {%if is_public %}
+            <option value="combined" {% if tripType == 'combined' %}selected{% endif %}>
+                {{all}}
+            </option>
             {% for type, data in publicDistinctTypes.items() %}
                 <option value="{{ type }}" {% if tripType == type %}selected{% endif %}>
                 {{ data }}
                 </option>
             {% endfor %}       
         {%else%}
+            <option value="combined" {% if tripType == 'combined' %}selected{% endif %}>
+                All Types Combined
+            </option>
             {% for type, data in distinctTypes.items() %}
                 <option value="{{ type }}" {% if tripType == type %}selected{% endif %}>
                 {{ data.label }}
@@ -141,6 +147,30 @@
         }
     };
 
+    // Trip type labels for combined mode
+    const TRIP_TYPE_LABELS = {
+        'air': '{{distinctTypes.air.label if distinctTypes.air else "Air"}}',
+        'helicopter': '{{distinctTypes.helicopter.label if distinctTypes.helicopter else "Helicopter"}}',
+        'train': '{{distinctTypes.train.label if distinctTypes.train else "Train"}}',
+        'tram': '{{distinctTypes.tram.label if distinctTypes.tram else "Tram"}}',
+        'metro': '{{distinctTypes.metro.label if distinctTypes.metro else "Metro"}}',
+        'bus': '{{distinctTypes.bus.label if distinctTypes.bus else "Bus"}}',
+        'ferry': '{{distinctTypes.ferry.label if distinctTypes.ferry else "Ferry"}}',
+        'car': '{{distinctTypes.car.label if distinctTypes.car else "Car"}}',
+        'cycle': '{{distinctTypes.cycle.label if distinctTypes.cycle else "Cycle"}}',
+        'walk': '{{distinctTypes.walk.label if distinctTypes.walk else "Walk"}}',
+        'aerialway': '{{distinctTypes.aerialway.label if distinctTypes.aerialway else "Aerialway"}}'
+    };
+
+    // Available trip types from backend
+    const AVAILABLE_TRIP_TYPES = [
+        {%if is_public %}
+            {% for type in publicDistinctTypes.keys() %}'{{ type }}',{% endfor %}
+        {%else%}
+            {% for type in distinctTypes.keys() %}'{{ type }}',{% endfor %}
+        {% endif %}
+    ];
+
     function getEnabledMetrics() {
         return Object.keys(METRICS_CONFIG).filter(key => METRICS_CONFIG[key].enabled);
     }
@@ -152,9 +182,11 @@
     var username = "{{username}}";
     var statYear = "{{statYear if statYear else ''}}";
     var yearDefined = "{{ 'true' if statYear is not none else 'false' }}";
+    var isCombinedMode = tripType === 'combined';
     
     var currentMetric = 'trips';
     var statsData = null;
+    var combinedStatsData = null;
     var chartsInstances = {};
     var currentChart = null;
     var expandedMode = false;
@@ -235,6 +267,7 @@
             if (item.route) converted.route = item.route;
             if (item.station) converted.station = item.station;
             if (item.year !== undefined) converted.year = item.year;
+            if (item.tripType) converted.tripType = item.tripType;
             
             // Extract metric values (store raw numbers only)
             if (item['past' + suffix] !== undefined) {
@@ -280,17 +313,156 @@
         };
     }
 
+    // ============================================
+    // COMBINED MODE DATA MERGING
+    // ============================================
+    function mergeCombinedData(allTypeData) {
+        const merged = {
+            countries: {},
+            operators: {},
+            material: {},
+            routes: {},
+            stations: {},
+            years: {}
+        };
+
+        // Merge data from all trip types
+        Object.keys(allTypeData).forEach(tripType => {
+            const data = allTypeData[tripType];
+            
+            // Merge countries
+            (data.countries || []).forEach(item => {
+                const key = item.country;
+                if (!merged.countries[key]) {
+                    merged.countries[key] = { country: key, tripTypes: {} };
+                }
+                if (!merged.countries[key].tripTypes[tripType]) {
+                    merged.countries[key].tripTypes[tripType] = { past: 0, plannedFuture: 0, future: 0 };
+                }
+                merged.countries[key].tripTypes[tripType].past += item.past || 0;
+                merged.countries[key].tripTypes[tripType].plannedFuture += item.plannedFuture || 0;
+                merged.countries[key].tripTypes[tripType].future += item.future || 0;
+            });
+
+            // Merge operators
+            (data.operators || []).forEach(item => {
+                const key = item.operator;
+                if (!merged.operators[key]) {
+                    merged.operators[key] = { operator: key, tripTypes: {} };
+                }
+                if (!merged.operators[key].tripTypes[tripType]) {
+                    merged.operators[key].tripTypes[tripType] = { past: 0, plannedFuture: 0, future: 0 };
+                }
+                merged.operators[key].tripTypes[tripType].past += item.past || 0;
+                merged.operators[key].tripTypes[tripType].plannedFuture += item.plannedFuture || 0;
+                merged.operators[key].tripTypes[tripType].future += item.future || 0;
+            });
+
+            // Merge material
+            (data.material || []).forEach(item => {
+                const key = item.material;
+                if (!merged.material[key]) {
+                    merged.material[key] = { material: key, tripTypes: {} };
+                }
+                if (!merged.material[key].tripTypes[tripType]) {
+                    merged.material[key].tripTypes[tripType] = { past: 0, plannedFuture: 0, future: 0 };
+                }
+                merged.material[key].tripTypes[tripType].past += item.past || 0;
+                merged.material[key].tripTypes[tripType].plannedFuture += item.plannedFuture || 0;
+                merged.material[key].tripTypes[tripType].future += item.future || 0;
+            });
+
+            // Merge routes
+            (data.routes || []).forEach(item => {
+                const key = item.route;
+                if (!merged.routes[key]) {
+                    merged.routes[key] = { route: key, tripTypes: {} };
+                }
+                if (!merged.routes[key].tripTypes[tripType]) {
+                    merged.routes[key].tripTypes[tripType] = { past: 0, plannedFuture: 0, future: 0 };
+                }
+                merged.routes[key].tripTypes[tripType].past += item.past || 0;
+                merged.routes[key].tripTypes[tripType].plannedFuture += item.plannedFuture || 0;
+                merged.routes[key].tripTypes[tripType].future += item.future || 0;
+            });
+
+            // Merge stations
+            (data.stations || []).forEach(item => {
+                const key = item.station;
+                if (!merged.stations[key]) {
+                    merged.stations[key] = { station: key, tripTypes: {} };
+                }
+                if (!merged.stations[key].tripTypes[tripType]) {
+                    merged.stations[key].tripTypes[tripType] = { past: 0, plannedFuture: 0, future: 0 };
+                }
+                merged.stations[key].tripTypes[tripType].past += item.past || 0;
+                merged.stations[key].tripTypes[tripType].plannedFuture += item.plannedFuture || 0;
+                merged.stations[key].tripTypes[tripType].future += item.future || 0;
+            });
+
+            // Merge years
+            (data.years || []).forEach(item => {
+                const key = item.year;
+                if (!merged.years[key]) {
+                    merged.years[key] = { year: key, tripTypes: {} };
+                }
+                if (!merged.years[key].tripTypes[tripType]) {
+                    merged.years[key].tripTypes[tripType] = { past: 0, plannedFuture: 0, future: 0 };
+                }
+                merged.years[key].tripTypes[tripType].past += item.past || 0;
+                merged.years[key].tripTypes[tripType].plannedFuture += item.plannedFuture || 0;
+                merged.years[key].tripTypes[tripType].future += item.future || 0;
+            });
+        });
+
+        // Convert objects to sorted arrays
+        function sortMergedData(obj, sortKey) {
+            return Object.values(obj).sort((a, b) => {
+                const aTotal = Object.values(a.tripTypes).reduce((sum, t) => sum + t.past + t.plannedFuture, 0);
+                const bTotal = Object.values(b.tripTypes).reduce((sum, t) => sum + t.past + t.plannedFuture, 0);
+                return bTotal - aTotal;
+            });
+        }
+
+        return {
+            countries: sortMergedData(merged.countries),
+            operators: sortMergedData(merged.operators),
+            material: sortMergedData(merged.material),
+            routes: sortMergedData(merged.routes),
+            stations: sortMergedData(merged.stations),
+            years: Object.values(merged.years).sort((a, b) => a.year - b.year)
+        };
+    }
+
     function groupData(data, key) {
         if (data.length <= 10) {
             return data;
         }
         var grouped = data.slice(0, 10);
-        var others = data.slice(10).reduce((acc, item) => {
-            acc.past += item.past;
-            acc.plannedFuture += item.plannedFuture;
-            return acc;
-        }, { [key]: '{{others}}', past: 0, plannedFuture: 0 });
-        grouped.push(others);
+        
+        if (isCombinedMode) {
+            // For combined mode, merge tripTypes for "others"
+            var others = data.slice(10).reduce((acc, item) => {
+                Object.keys(item.tripTypes || {}).forEach(tripType => {
+                    if (!acc.tripTypes[tripType]) {
+                        acc.tripTypes[tripType] = { past: 0, plannedFuture: 0, future: 0 };
+                    }
+                    acc.tripTypes[tripType].past += item.tripTypes[tripType].past || 0;
+                    acc.tripTypes[tripType].plannedFuture += item.tripTypes[tripType].plannedFuture || 0;
+                    acc.tripTypes[tripType].future += item.tripTypes[tripType].future || 0;
+                });
+                return acc;
+            }, { [key]: '{{others}}', tripTypes: {} });
+            grouped.push(others);
+        } else {
+            var others = data.slice(10).reduce((acc, item) => {
+                acc.past += item.past;
+                acc.plannedFuture += item.plannedFuture;
+                return acc;
+            }, { [key]: '{{others}}', past: 0, plannedFuture: 0 });
+            grouped.push(others);
+        }
+        
         return grouped;
     }
 
@@ -334,6 +506,10 @@
     }
 
     function createSeries(data, color) {
+        if (isCombinedMode) {
+            return createCombinedSeries(data);
+        }
+        
         return [
             {
                 name: '{{past}}',
@@ -353,6 +529,46 @@
         ];
     }
 
+    function createCombinedSeries(data) {
+        const series = [];
+        
+        // Create series for each trip type (past and planned future)
+        AVAILABLE_TRIP_TYPES.forEach(tripType => {
+            const color = getColor(tripType);
+            const label = TRIP_TYPE_LABELS[tripType] || tripType;
+            
+            // Past trips for this type
+            series.push({
+                name: `${label} ({{past}})`,
+                type: 'bar',
+                stack: 'Total',  // Changed from 'Past' to 'Total'
+                data: data.map(item => {
+                    const tripTypeData = item.tripTypes && item.tripTypes[tripType];
+                    return {
+                        value: tripTypeData ? tripTypeData.past : 0,
+                        itemStyle: { color: color }
+                    };
+                })
+            });
+            
+            // Planned future trips for this type
+            series.push({
+                name: `${label} ({{plannedFuture}})`,
+                type: 'bar',
+                stack: 'Total',  // Changed from 'Future' to 'Total'
+                data: data.map(item => {
+                    const tripTypeData = item.tripTypes && item.tripTypes[tripType];
+                    return {
+                        value: tripTypeData ? tripTypeData.plannedFuture : 0,
+                        itemStyle: { color: createPattern(color) }
+                    };
+                })
+            });
+        });
+        
+        return series;
+    }
+
     // ============================================
     // CHART RENDERING
     // ============================================
@@ -360,19 +576,57 @@
         const config = METRICS_CONFIG[currentMetric];
         let result = params[0].name + '<br/>';
 
-        params.forEach(function(item) {
-            if (item.value > 0) {
-                let marker;
-                if (item.seriesName === '{{plannedFuture}}') {
-                    const pattern = createPattern(getColor(tripType));
-                    const patternURL = pattern.image.toDataURL();
-                    marker = `<span style="display:inline-block;margin-right:5px;border-radius:10px;width:10px;height:10px;background:url(${patternURL});"></span>`;
-                } else {
-                    marker = item.marker;
+        if (isCombinedMode) {
+            // Group by trip type
+            const byTripType = {};
+            params.forEach(item => {
+                if (item.value > 0) {
+                    // Extract trip type and status from series name
+                    const match = item.seriesName.match(/^(.+?) \(({{past}}|{{plannedFuture}})\)$/);
+                    if (match) {
+                        const tripTypeLabel = match[1];
+                        const status = match[2];
+                        
+                        if (!byTripType[tripTypeLabel]) {
+                            byTripType[tripTypeLabel] = { past: 0, future: 0 };
+                        }
+                        
+                        if (status === '{{past}}') {
+                            byTripType[tripTypeLabel].past = item.value;
+                        } else {
+                            byTripType[tripTypeLabel].future = item.value;
+                        }
+                    }
                 }
-                result += `${marker} ${item.seriesName}: ${config.formatValue(item.value)}<br/>`;
-            }
-        });
+            });
+            
+            // Display grouped by trip type
+            Object.keys(byTripType).forEach(tripTypeLabel => {
+                const data = byTripType[tripTypeLabel];
+                result += `<strong>${tripTypeLabel}</strong><br/>`;
+                
+                if (data.past > 0) {
+                    result += `&nbsp;&nbsp;{{past}}: ${config.formatValue(data.past)}<br/>`;
+                }
+                if (data.future > 0) {
+                    result += `&nbsp;&nbsp;{{plannedFuture}}: ${config.formatValue(data.future)}<br/>`;
+                }
+            });
+        } else {
+            params.forEach(function(item) {
+                if (item.value > 0) {
+                    let marker;
+                    if (item.seriesName === '{{plannedFuture}}') {
+                        const pattern = createPattern(getColor(tripType));
+                        const patternURL = pattern.image.toDataURL();
+                        marker = `<span style="display:inline-block;margin-right:5px;border-radius:10px;width:10px;height:10px;background:url(${patternURL});"></span>`;
+                    } else {
+                        marker = item.marker;
+                    }
+                    result += `${marker} ${item.seriesName}: ${config.formatValue(item.value)}<br/>`;
+                }
+            });
+        }
 
         return result;
     }
@@ -460,7 +714,7 @@
             title: { text: "{{operator}}" },
             tooltip: {
                 trigger: 'axis',
-                axisPointer: { type: 'shadow' },
+axisPointer: { type: 'shadow' },
                 formatter: commonTooltipFormatter
             },
             yAxis: {
@@ -611,16 +865,61 @@
         }
     }
 
+    async function fetchCombinedStatsData() {
+        const allTypeData = {};
+        
+        for (const type of AVAILABLE_TRIP_TYPES) {
+            var isAdmin = "{{ 'true' if admin else 'false' }}";
+            
+            var urlPath;
+            if (isAdmin === "true") {
+                urlPath = statYear 
+                    ? `/admin/getStats/${statYear}/${type}`
+                    : `/admin/getStats/${type}`;
+            } else {
+                urlPath = statYear 
+                    ? `/${username}/getStats/${statYear}/${type}`
+                    : `/${username}/getStats/${type}`;
+            }
+            
+            try {
+                const response = await fetch(urlPath);
+                if (response.ok) {
+                    allTypeData[type] = await response.json();
+                }
+            } catch (error) {
+                console.error(`Error fetching stats for ${type}:`, error);
+            }
+        }
+        
+        return allTypeData;
+    }
+
     async function fetchDataAndRenderCharts() {
         showLoading();
         try {
-            statsData = await fetchStatsData();
-            
-            if (statsData) {
-                var displayData = extractDataForMetric(statsData, currentMetric);
-                renderCharts(displayData);
+            if (isCombinedMode) {
+                const allTypeData = await fetchCombinedStatsData();
+                
+                // Extract data for current metric from each type
+                const extractedByType = {};
+                Object.keys(allTypeData).forEach(type => {
+                    extractedByType[type] = extractDataForMetric(allTypeData[type], currentMetric);
+                });
+                
+                // Merge all types together
+                combinedStatsData = allTypeData;
+                var mergedData = mergeCombinedData(extractedByType);
+                renderCharts(mergedData);
             } else {
-                console.error('No data available');
+                statsData = await fetchStatsData();
+                
+                if (statsData) {
+                    var displayData = extractDataForMetric(statsData, currentMetric);
+                    renderCharts(displayData);
+                } else {
+                    console.error('No data available');
+                }
             }
         } catch (error) {
             console.error('Error processing data:', error);
@@ -633,11 +932,26 @@
     // METRIC SWITCHING
     // ============================================
     async function switchMetric(newMetric) {
-        if (!statsData || !METRICS_CONFIG[newMetric]?.enabled) return;
+        if (!METRICS_CONFIG[newMetric]?.enabled) return;
         
         currentMetric = newMetric;
-        var displayData = extractDataForMetric(statsData, currentMetric);
-        renderCharts(displayData);
+        
+        if (isCombinedMode) {
+            if (!combinedStatsData) return;
+            
+            // Re-extract data for new metric from cached combined data
+            const extractedByType = {};
+            Object.keys(combinedStatsData).forEach(type => {
+                extractedByType[type] = extractDataForMetric(combinedStatsData[type], currentMetric);
+            });
+            
+            var mergedData = mergeCombinedData(extractedByType);
+            renderCharts(mergedData);
+        } else {
+            if (!statsData) return;
+            var displayData = extractDataForMetric(statsData, currentMetric);
+            renderCharts(displayData);
+        }
     }
 
     // ============================================
@@ -660,7 +974,18 @@
             'chart-years': 'years'
         };
         var dataKey = dataKeyMap[chartId];
-        var displayData = extractDataForMetric(statsData, currentMetric);
+        
+        var displayData;
+        if (isCombinedMode) {
+            const extractedByType = {};
+            Object.keys(combinedStatsData).forEach(type => {
+                extractedByType[type] = extractDataForMetric(combinedStatsData[type], currentMetric);
+            });
+            displayData = mergeCombinedData(extractedByType);
+        } else {
+            displayData = extractDataForMetric(statsData, currentMetric);
+        }
+        
         var dataToUse = displayData[dataKey];
         var config = METRICS_CONFIG[currentMetric];
 
@@ -797,8 +1122,18 @@
             currentChart.dispose();
             currentChart = null;
         }
-        var displayData = extractDataForMetric(statsData, currentMetric);
-        renderCharts(displayData);
+        
+        if (isCombinedMode) {
+            const extractedByType = {};
+            Object.keys(combinedStatsData).forEach(type => {
+                extractedByType[type] = extractDataForMetric(combinedStatsData[type], currentMetric);
+            });
+            var mergedData = mergeCombinedData(extractedByType);
+            renderCharts(mergedData);
+        } else {
+            var displayData = extractDataForMetric(statsData, currentMetric);
+            renderCharts(displayData);
+        }
     });
 
     // ============================================
@@ -808,20 +1143,21 @@
         var selectedYear = $(this).val();
         var isPublic = "{{ 'true' if is_public else 'false' }}";
         var isAdmin = "{{ 'true' if admin else 'false' }}";
+        var currentTripType = tripType;
 
         var redirectUrl;
         if (isAdmin == "true") {
             redirectUrl = selectedYear === "all" ? 
-                '{{ url_for("admin_stats", tripType=tripType) }}' :
-                '{{ url_for("admin_stats", year="YEAR", tripType=tripType) }}'.replace("YEAR", selectedYear);
+                '{{ url_for("admin_stats", tripType="TRIPTYPE") }}'.replace("TRIPTYPE", currentTripType) :
+                '{{ url_for("admin_stats", year="YEAR", tripType="TRIPTYPE") }}'.replace("YEAR", selectedYear).replace("TRIPTYPE", currentTripType);
         } else if (isPublic == "true") {
             redirectUrl = selectedYear === "all" ?
-                '{{ url_for("public_stats", username=username, tripType=tripType) }}' :
-                '{{ url_for("public_stats", username=username, year="YEAR", tripType=tripType) }}'.replace("YEAR", selectedYear);
+                '{{ url_for("public_stats", username=username, tripType="TRIPTYPE") }}'.replace("TRIPTYPE", currentTripType) :
+                '{{ url_for("public_stats", username=username, year="YEAR", tripType="TRIPTYPE") }}'.replace("YEAR", selectedYear).replace("TRIPTYPE", currentTripType);
         } else {
             redirectUrl = selectedYear === "all" ?
-                '{{ url_for("stats", username=username, tripType=tripType) }}' :
-                '{{ url_for("stats", username=username, year="YEAR", tripType=tripType) }}'.replace("YEAR", selectedYear);
+                '{{ url_for("stats", username=username, tripType="TRIPTYPE") }}'.replace("TRIPTYPE", currentTripType) :
+                '{{ url_for("stats", username=username, year="YEAR", tripType="TRIPTYPE") }}'.replace("YEAR", selectedYear).replace("TRIPTYPE", currentTripType);
         }
 
         window.location.href = redirectUrl;

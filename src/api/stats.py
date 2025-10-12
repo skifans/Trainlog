@@ -390,4 +390,4 @@ def get_distinct_stat_years(username, trip_type):
             stats_sql.distinct_stat_years(),
             {"user_id": user_id, "tripType": trip_type}
         ).fetchall()
-        return [row[0] for row in result]
+    return [row[0] for row in result]
