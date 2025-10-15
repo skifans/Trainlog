@@ -249,18 +249,24 @@ function getGetParams(){
 
 function mToKm(m) {
     var km = m / 1000;
-    
+    var value, suffix;
+   
     if (km >= 1000000) {
-        var mkm = km / 1000000;
-        return mkm.toFixed(1).replace(/\.0$/, '') + 'M';
-    } else if (km >= 100000) {
-        var kkm = km / 1000;
-        return kkm.toFixed(1).replace(/\.0$/, '') + 'k';
+        value = km / 1000000;
+        suffix = 'M';
     } else if (km > 1) {
-        return Math.round(km) + '';
+        return new Intl.NumberFormat().format(Math.round(km));
     } else {
-        return Number(km.toFixed(2)) + '';
+        return new Intl.NumberFormat(undefined, {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 2
+        }).format(km);
     }
+    
+    return new Intl.NumberFormat(undefined, {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 1
+    }).format(value) + suffix;
 }
 function isNumber(num){
   if (!isNaN(num) && num != "" && num != " ")
