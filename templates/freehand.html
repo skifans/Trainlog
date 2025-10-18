@@ -42,9 +42,13 @@
     var origLabel = newTrip["originStation"][1];
     var destLabel = newTrip["destinationStation"][1];
 
-    var wplist = [ origCoord, destCoord ];
-    var currentRoute;
-
+    // This 'points' array is the single source of truth for the route.
+    // We standardize on L.latLng objects for consistency.
+    var points = [
+        L.latLng(origCoord[0], origCoord[1]),
+        L.latLng(destCoord[0], destCoord[1])
+    ];
+    
     var spinnerContent = '<div class="spinner-container"><div class="lds-spinner"><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div></div></div>';
     var errorContent = "<h4> {{routingError}} <h4>";
         errorContent += "<p> {{routingErrorDetails}} </p>";
@@ -54,7 +58,7 @@
         saveErrorContent += "<p> {{saveErrorDetails}} </p>";
         saveErrorContent += `<p><button onclick="location.reload();"> {{retry}} </button></p>`;
 
-    var map = (null,origCoord);
+    var map = createMap(null,origCoord);
     var sidebar;
 
     if (window.innerWidth > 600){
@@ -73,9 +77,7 @@
     L.Control.MyControl = L.Control.extend({
         onAdd: function(map) {
             var el = L.DomUtil.create('div', 'leaflet-bar');
-
             el.innerHTML += '<button class="button" onclick="sidebar.show()">⬅️</button>';
-
             return el;
         }
     });
@@ -88,46 +90,34 @@
         position: 'topright'
     }).addTo(map);
 
-    const origLocation = {lat: origCoord[0], lng: origCoord[1]};
-    const destLocation = {lat: destCoord[0], lng: destCoord[1]};
 
-    var content = `<h4>${origLabel} to ${destLabel}</h4>`;
-    var distance = getDistanceFromLocations(origLocation, destLocation);
-    var km = mToKm(distance);
-    var sailingTime = (distance / 30) * 3.6;
-    var time = secondsToDhm(sailingTime, "{{langId}}");
-    content += `<p><i>${km} km, ${time}</i></p>`;
-    content += `<p><button id="saveTrip" type="button" onclick="saveTrip()"> Submit </button></p>`;
+    var geodesic; // Will hold the polyline layer
+    var waypointMarkers = []; // Will hold intermediate markers
+    var path; // Will hold the final path for saving
 
-    sidebar.setContent(content);
-
-    var points = [origLocation, destLocation];
-
-    let geodesic = new L.Geodesic(points, { className: "polyline ferryPolyline pastPolyline", wrap:false, steps:8 }).addTo(map);
-    refreshPolyline();
-
-    var geodesicPath = geodesic.getLatLngs()[0];
-    var geodesicLimits = [geodesicPath[0], geodesicPath[geodesicPath.length - 1]];
-
-    var origMarker = L.marker(geodesicLimits[0], {icon:markerIconStart, draggable: true}).addTo(map);
-    var destMarker = L.marker(geodesicLimits[1], {icon:markerIconEnd, draggable: true}).addTo(map);
+    // Create the persistent start and end markers
+    // They are created once and manage their own state.
+    var origMarker = L.marker(points[0], {icon:markerIconStart, draggable: true}).addTo(map);
+    var destMarker = L.marker(points[points.length - 1], {icon:markerIconEnd, draggable: true}).addTo(map);
 
     origMarker.on('dragend', () => {
+        // 1. Update the source of truth
         points[0] = origMarker.getLatLng();
+        // 2. Redraw everything
         refreshPolyline();
     });
 
     destMarker.on('dragend', () => {
+        // 1. Update the source of truth
         points[points.length - 1] = destMarker.getLatLng();
+        // 2. Redraw everything
         refreshPolyline();
     });
 
-    var bounds = new L.LatLngBounds(geodesicLimits);
-    map.fitBounds(bounds, {padding: [50,50]});
+    map.fitBounds(new L.LatLngBounds(points), {padding: [50,50]});
 
-    var waypointMarkers = [];
-    var segmentIndices = [];
-    var finalPath;
+    // Initial draw
+    refreshPolyline();
 
     function getClosestSegmentIndex(points, clickedPoint) {
         var minDistance = Infinity;
@@ -149,47 +139,65 @@
     }
 
     function refreshPolyline() {
-        map.removeLayer(geodesic);
-        geodesic = new L.Geodesic(points, { className: "polyline ferryPolyline pastPolyline", wrap:false, steps:8 }).addTo(map);
-        geodesic.on('click', function (e) {
-            var waypointMarker = L.marker(e.latlng, {draggable: true}).addTo(map);
-            waypointMarkers.push(waypointMarker);
+        
+        // 1. Remove old layers
+        if (geodesic) {
+            map.removeLayer(geodesic);
+        }
+        // Remove all old intermediate markers
+        waypointMarkers.forEach(function(marker) {
+            map.removeLayer(marker);
+        });
+        waypointMarkers = []; // Clear the array
 
+        // 2. Create new polyline from the source of truth ('points')
+        geodesic = new L.Geodesic(points, { className: "polyline ferryPolyline pastPolyline", wrap:false, steps:8 }).addTo(map);
+
+        // 3. Attach click handler to the *new* line
+        geodesic.on('click', function (e) {
             var clickedPoint = e.latlng;
             var closestSegmentIndex = getClosestSegmentIndex(points, clickedPoint);
 
-            // Insert the new point in the middle of the closest segment
+            // 1. Update the source of truth
             points.splice(closestSegmentIndex + 1, 0, clickedPoint);
-            segmentIndices.push(closestSegmentIndex + 1);
 
-            waypointMarker.on('dragend', function () {
-                var marker = this;
-                var position = marker.getLatLng();
-                var markerIndex = waypointMarkers.indexOf(marker);
-
-                // Update the corresponding point in the points array
-                points[segmentIndices[markerIndex]] = position;
-
-                // Refresh the polyline
-                refreshPolyline();
-            });
+            // 2. Redraw everything (this fixes the "unlock" bug)
+            refreshPolyline();
         });
 
-        distance = 0;
+        // 4. Re-create all intermediate waypoint markers (skip start/end)
+        for (let i = 1; i < points.length - 1; i++) {
+            let waypointMarker = L.marker(points[i], {draggable: true}).addTo(map);
+            waypointMarkers.push(waypointMarker); // Add to array for removal next time
+
+            // Attach drag handler that knows its correct index in 'points'
+            waypointMarker.on('dragend', function () {
+                // 'this' is the marker that was dragged
+                // 'i' is its index from when the handler was created
+                points[i] = this.getLatLng();
+                refreshPolyline();
+            });
+        }
+
+        // 5. Update sidebar and trip data
+        var distance = 0;
         for (let i = 1; i < points.length; i++) {
+            // Assuming getDistanceFromLocations can handle L.latLng objects
             distance += getDistanceFromLocations(points[i-1], points[i]);
         }
-        content = `<h4>${origLabel} to ${destLabel}</h4>`;
-        km = mToKm(distance);
-        sailingTime = (distance / 30) * 3.6;
-        time = secondsToDhm(sailingTime, "{{langId}}");
+        
+        var content = `<h4>${origLabel} to ${destLabel}</h4>`;
+        var km = mToKm(distance);
+        var sailingTime = (distance / 30) * 3.6;
+        var time = secondsToDhm(sailingTime, "{{langId}}");
         content += `<p><i>${km} km, ${time}</i></p>`;
         content += `<p><button id="saveTrip" type="button" onclick="saveTrip()"> Submit </button></p>`;
 
         newTrip["trip_length"] = distance;
         newTrip["estimated_trip_duration"] = sailingTime;
+
         path = geodesic.getLatLngs()[0];
-        console.log(path)
+        console.log(path);
         sidebar.setContent(content);
     }
 
@@ -215,5 +223,3 @@
     }, 500);
 </script>
 {% endblock %}
-
-   
