@@ -283,7 +283,7 @@ $(document).ready(function () {
             var isActive = $(this).is(':checked');
 
             $.ajax({
-                url: '/{{ username }}/toggle_ticket_active/' + ticketId,
+                url: '/u/{{ username }}/toggle_ticket_active/' + ticketId,
                 type: 'GET',
                 data: JSON.stringify({ active: isActive }),
                 contentType: 'application/json',
