@@ -259,7 +259,7 @@ $(document).ready(function () {
 
             if (confirm('Are you sure you want to delete this ticket?')) {
                 $.ajax({
-                    url: '/{{ username }}/delete_ticket/' + ticketId,
+                    url: '/u/{{ username }}/delete_ticket/' + ticketId,
                     type: 'GET',
                     success: function (response) {
                         if (response.success) {
@@ -336,7 +336,7 @@ $(document).ready(function () {
         var formData = $(this).serialize();
 
         $.ajax({
-            url: '/{{ username }}/edit_ticket',
+            url: '/u/{{ username }}/edit_ticket',
             type: 'POST',
             data: formData,
             success: function (response) {
